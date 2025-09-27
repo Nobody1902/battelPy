@@ -1,6 +1,5 @@
 import sys
 
-from parser import clean_lines
 import parser
 
 if len(sys.argv) < 3:
@@ -15,7 +14,7 @@ with open(sys.argv[1], "r") as f:
 
 assert lines is not None
 
-cleaned_lines = clean_lines(lines)
+cleaned_lines = parser.clean_lines(lines)
 
 parsed_lines = [parser.parse_line(line) for line in cleaned_lines]
 output = parser.output(parsed_lines)
