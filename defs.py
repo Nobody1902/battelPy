@@ -1,4 +1,5 @@
 from enum import Enum
+from dataclasses import dataclass
 
 
 class ArgumentType(Enum):
@@ -110,3 +111,11 @@ class REGISTERS(Enum):
     R29 = 0x1D
     SP = 0x1E
     PC = 0x1F
+
+
+@dataclass
+class Section:
+    name: str
+    lines: list[str]
+    inline: bool
+    offset: int

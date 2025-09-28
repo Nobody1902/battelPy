@@ -16,8 +16,20 @@ assert lines is not None
 
 cleaned_lines = parser.clean_lines(lines)
 
-parsed_lines = [parser.parse_line(line) for line in cleaned_lines]
-output = parser.output(parsed_lines)
+sections = parser.parse_sections(cleaned_lines)
+
+start_section = next(
+    (s for s in sections if s.name == "start" or s.name == "_start"), None
+)
+
+assert start_section is not None
+
+if start_section.name.startswith("_"):
+    raise Exception(f"Start section must be inline @ {start_section.offset}")
+
+inline_sections = parser.compile_inline(sections)
+
+output = parser.output(inline_sections["start"])
 
 print(f"{output:b}")
 
