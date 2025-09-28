@@ -118,4 +118,5 @@ class Section:
     name: str
     lines: list[str]
     inline: bool
+    relative_offset: int
     offset: int

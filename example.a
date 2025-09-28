@@ -1,6 +1,8 @@
-start:
-mv r2, pc
+_start 1024:
+ldi [@_start+1]
 @flag
+add r0, pc
+jmp r0
 
 flag:
 flag

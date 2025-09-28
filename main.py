@@ -19,19 +19,19 @@ cleaned_lines = parser.clean_lines(lines)
 sections = parser.parse_sections(cleaned_lines)
 
 start_section = next(
-    (s for s in sections if s.name == "start" or s.name == "_start"), None
+    (s for s in sections if s.name == "_start" or s.name == "start"), None
 )
 
 assert start_section is not None
 
-if start_section.name.startswith("_"):
-    raise Exception(f"Start section must be inline @ {start_section.offset}")
+if not start_section.name.startswith("_"):
+    raise Exception(f"Start section can't be inline @ {start_section.offset}")
 
 inline_sections = parser.compile_inline(sections)
 
-output = parser.output(inline_sections["start"])
-
-print(f"{output:b}")
+start_compiled = parser.compile_section(start_section, inline_sections, sections)
+print(start_compiled)
+output = parser.output(start_compiled)
 
 with open(sys.argv[2], "wb") as f:
-    f.write(output.to_bytes(length=output.bit_length(), byteorder="big"))
+    f.write(output)

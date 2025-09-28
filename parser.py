@@ -1,6 +1,9 @@
 import itertools
 import defs
 import sys
+import re
+
+import preprocessor
 
 
 def _collapse_spaces(s: str) -> str:
@@ -29,16 +32,22 @@ def clean_lines(text: list[str]) -> list[str]:
     ]
 
 
-def _parse_register(arg: str, i: int):
+def _parse_register(arg: str):
     if arg.upper() in defs.REGISTERS.__members__:
         return defs.REGISTERS[arg.upper()].value
 
-    raise Exception(f'Unknown register: "{arg}" @ {i + 1}')
+    raise Exception(f'Unknown register: "{arg}"')
 
 
-def _parse_value(arg: str, i: int, max_size=5):
+def _parse_value(arg: str, variables: dict[str, int], max_size=5):
+    if arg.startswith("["):
+        assert arg.endswith("]")
+        expr = arg.removeprefix("[").removesuffix("]")
+        replaced_vars = preprocessor.replace_vars(expr, variables)
+        arg = str(preprocessor.eval_expr(replaced_vars))
+
     if arg.startswith("-"):
-        raise Exception(f'Value cannot be negative: "{arg}" @ {i + 1}')
+        raise Exception(f'Value cannot be negative: "{arg}"')
 
     if arg.isdigit():
         value = int(arg)
@@ -49,15 +58,15 @@ def _parse_value(arg: str, i: int, max_size=5):
     elif arg.startswith("0o"):
         value = int(arg, 8)
     else:
-        raise ValueError(f'Unknown value: "{arg}" @ {i + 1}')
+        raise ValueError(f'Unknown value: "{arg}"')
 
     if value.bit_length() > max_size:
-        raise ValueError(f"Value {value} exceeds maximum size of {max_size}b @ {i + 1}")
+        raise ValueError(f"Value {value} exceeds maximum size of {max_size}b")
 
     return value
 
 
-def _parse_arguments(args: list[str], op_signiture, line_idx: int) -> list:
+def _parse_arguments(args: list[str], op_signiture, variables: dict[str, int]) -> list:
     arguments = []
 
     if len(op_signiture["args"]) == 0:
@@ -71,42 +80,47 @@ def _parse_arguments(args: list[str], op_signiture, line_idx: int) -> list:
         arg_type = op_signiture["args"][i]
 
         if arg_type == defs.ArgumentType.REGISTER:
-            arguments.append(_parse_register(arg, line_idx))
+            arguments.append(_parse_register(arg))
         elif arg_type == defs.ArgumentType.VALUE:
-            arguments.append(_parse_value(arg, arg_sizes[i]))
+            arguments.append(_parse_value(arg, variables, arg_sizes[i]))
         elif arg_type == defs.ArgumentType.VALUE_OR_REGISTER:
             if arg.upper() in defs.REGISTERS.__members__:
-                arguments.append(_parse_register(arg, line_idx))
+                arguments.append(_parse_register(arg))
             else:
-                arguments.append(_parse_value(arg, arg_sizes[i]))
+                arguments.append(_parse_value(arg, variables, arg_sizes[i]))
 
     return arguments
 
 
-def parse_line(line: str, i: int) -> tuple[int, list[int]]:
-    operation, *args = line.split(" ")
+def parse_line(line: str, variables: dict[str, int]) -> tuple[int, list[int]]:
+    operation, *args = re.findall(r"\[[^\]]*\]|[^\s]+", line)
 
     if operation.upper() not in defs.OPERATIONS:
-        raise Exception(f'Unknown operation: "{operation}" @ {i + 1}')
+        raise Exception(f'Unknown operation: "{operation}"')
 
     op_signiture = defs.OPERATIONS[operation.upper()]
 
-    arguments = _parse_arguments(args, op_signiture, i)
+    arguments = _parse_arguments(args, op_signiture, variables)
 
     return (op_signiture["code"], arguments)
 
 
 def parse_lines(
     lines: list[str],
-    offset: int,
+    variables: dict[str, int],
+    inline_sections: dict[str, list[tuple[int, list[int]]]] | None = None,
 ) -> list[tuple[int, list[int]]]:
     result = []
-    for i, line in enumerate(lines):
+    for line in lines:
         if line.startswith("@"):
-            result.append(line.removeprefix("@"))
+            section_name = line.removeprefix("@")
+            if inline_sections is None:
+                result.append(section_name)
+            else:
+                result.extend(inline_sections[section_name])
             continue
 
-        result.append(parse_line(line, i + offset))
+        result.append(parse_line(line, variables))
 
     return result
 
@@ -117,10 +131,10 @@ def parse_sections(lines: list[str]) -> list[defs.Section]:
         if not line.endswith(":"):
             continue
 
-        if " " in line:
-            raise Exception(f'Section declaration contains space: "{line}" @ {i + 1}')
+        if " " in line and not line.startswith("_"):
+            raise Exception(f'Section declaration contains space: "{line}"')
 
-        sections[i] = line.removesuffix(":")
+        sections[i - len(sections.keys())] = (line.removesuffix(":"), i)
 
     result = []
 
@@ -128,10 +142,21 @@ def parse_sections(lines: list[str]) -> list[defs.Section]:
 
     for i, start in enumerate(sorted_keys):
         end = sorted_keys[i + 1] if i + 1 < len(sorted_keys) else len(lines)
-        section_name = sections[start]
+        section_name, section_line = sections[start]
         inline = not section_name.startswith("_")
+        if not inline:
+            name, offset = section_name.split(" ")
+            result.append(
+                defs.Section(
+                    name, lines[section_line + 1 : end], inline, start, int(offset)
+                )
+            )
+            continue
+
         result.append(
-            defs.Section(section_name, lines[start + 1 : end], inline, start + 1)
+            defs.Section(
+                section_name, lines[section_line + 1 : end], inline, start, start
+            )
         )
 
     return result
@@ -198,12 +223,29 @@ def compile_inline(
         if not section.inline:
             continue
 
-        result[section.name] = parse_lines(section.lines, section.offset)
+        result[section.name] = parse_lines(section.lines, {})
 
     return resolve_inline_sections(result)
 
 
-def output(parsed_lines: list[tuple[int, list[int]]]) -> int:
+def compile_section(
+    section: defs.Section,
+    inline_sections: dict[str, list[tuple[int, list[int]]]],
+    sections: list[defs.Section],
+) -> list[tuple[int, list[int]]]:
+    assert not section.inline
+
+    relative_sections = {
+        f"@{s.name}": s.relative_offset for s in sections if not s.inline
+    }
+    return parse_lines(
+        section.lines,
+        relative_sections,
+        inline_sections,
+    )
+
+
+def output(parsed_lines: list[tuple[int, list[int]]]) -> bytes:
     output = ""
 
     for line in parsed_lines:
@@ -223,4 +265,4 @@ def output(parsed_lines: list[tuple[int, list[int]]]) -> int:
 
         output += f"{line_output:0<16}"
 
-    return int(output, 2)
+    return int(output, 2).to_bytes(len(output) // 8, byteorder="big")
