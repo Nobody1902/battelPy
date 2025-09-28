@@ -1,6 +1,8 @@
 _start 1024:
 ldi [@_start+1]
+
 @flag
+
 add r0, pc
 jmp r0
 

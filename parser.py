@@ -142,6 +142,7 @@ def parse_sections(lines: list[str]) -> list[defs.Section]:
 
     for i, start in enumerate(sorted_keys):
         end = sorted_keys[i + 1] if i + 1 < len(sorted_keys) else len(lines)
+        end += 1
         section_name, section_line = sections[start]
         inline = not section_name.startswith("_")
         if not inline:

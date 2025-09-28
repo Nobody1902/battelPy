@@ -105,6 +105,7 @@ class REGISTERS(Enum):
     R23 = 0x17
     R24 = 0x18
     R25 = 0x19
+    # Reserved
     R26 = 0x1A
     R27 = 0x1B
     R28 = 0x1C
